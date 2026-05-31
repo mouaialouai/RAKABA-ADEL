@@ -56,59 +56,6 @@ async function startServer() {
     }
   }
 
-  function mergeStates(serverValue: string | undefined, clientValue: string): string {
-    if (!serverValue) return clientValue;
-    if (!clientValue) return serverValue;
-
-    try {
-      const serverObj = JSON.parse(serverValue);
-      const clientObj = JSON.parse(clientValue);
-
-      if (Array.isArray(serverObj) && Array.isArray(clientObj)) {
-        const testItem = serverObj[0] || clientObj[0];
-        if (testItem && typeof testItem === 'object') {
-          const idKey = ['id', 'code', 'learnerId', 'studentName', 'teacherName'].find(k => k in testItem);
-          if (idKey) {
-            const mergedMap = new Map();
-            
-            serverObj.forEach((item: any) => {
-              const key = item[idKey];
-              if (key !== undefined && key !== null) mergedMap.set(String(key), item);
-            });
-            
-            clientObj.forEach((item: any) => {
-              const key = item[idKey];
-              if (key !== undefined && key !== null) {
-                const existingItem = mergedMap.get(String(key));
-                if (existingItem) {
-                  mergedMap.set(String(key), { ...existingItem, ...item });
-                } else {
-                  mergedMap.set(String(key), item);
-                }
-              }
-            });
-            
-            return JSON.stringify(Array.from(mergedMap.values()));
-          }
-        }
-
-        const merged = [...serverObj];
-        clientObj.forEach((item: any) => {
-          if (!merged.some((existing: any) => JSON.stringify(existing) === JSON.stringify(item))) {
-            merged.push(item);
-          }
-        });
-        return JSON.stringify(merged);
-      } else if (typeof serverObj === 'object' && typeof clientObj === 'object' && serverObj !== null && clientObj !== null) {
-        return JSON.stringify({ ...serverObj, ...clientObj });
-      }
-    } catch (e) {
-      // JSON parse error fall-through
-    }
-
-    return clientValue;
-  }
-
   app.post("/api/sync", (req, res) => {
     try {
       const { clientData } = req.body;
@@ -117,13 +64,25 @@ async function startServer() {
       }
 
       let updatedKeys = 0;
+
+      // Filter and evaluate each incoming key for sync potential
       Object.keys(clientData).forEach(key => {
+        if (!key.startsWith("rq_") || key === "rq_active_role" || key.endsWith("_timestamp")) {
+          return;
+        }
+
         const clientVal = clientData[key];
+        const clientTimeStr = clientData[`${key}_timestamp`] || "0";
+        const clientTime = parseInt(clientTimeStr, 10) || 0;
+
         const serverVal = serverStateStore[key];
-        const mergedVal = mergeStates(serverVal, clientVal);
-        
-        if (serverStateStore[key] !== mergedVal) {
-          serverStateStore[key] = mergedVal;
+        const serverTimeStr = serverStateStore[`${key}_timestamp`] || "0";
+        const serverTime = parseInt(serverTimeStr, 10) || 0;
+
+        // Overwrite if server lacks it, or client value has a newer timestamp
+        if (serverVal === undefined || clientTime > serverTime) {
+          serverStateStore[key] = clientVal;
+          serverStateStore[`${key}_timestamp`] = String(clientTime);
           updatedKeys++;
         }
       });

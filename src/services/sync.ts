@@ -3,6 +3,38 @@
  * Facilitates instant cross-device updates for important events (Attendance, Absences, Results, etc.)
  */
 
+// 🛡️ Global Storage Interception & Timestamp Automation
+if (typeof window !== 'undefined' && !(window as any).__storage_intercepted__) {
+  (window as any).__storage_intercepted__ = true;
+  (window as any).__is_syncing_data__ = false;
+
+  const originalSetItem = localStorage.setItem;
+  localStorage.setItem = function (key: string, value: string) {
+    originalSetItem.call(localStorage, key, value);
+    if (
+      key.startsWith('rq_') &&
+      key !== 'rq_active_role' &&
+      !key.endsWith('_timestamp') &&
+      !(window as any).__is_syncing_data__
+    ) {
+      originalSetItem.call(localStorage, `${key}_timestamp`, String(Date.now()));
+    }
+  };
+
+  const originalRemoveItem = localStorage.removeItem;
+  localStorage.removeItem = function (key: string) {
+    originalRemoveItem.call(localStorage, key);
+    if (
+      key.startsWith('rq_') &&
+      key !== 'rq_active_role' &&
+      !key.endsWith('_timestamp') &&
+      !(window as any).__is_syncing_data__
+    ) {
+      originalRemoveItem.call(localStorage, `${key}_timestamp`);
+    }
+  };
+}
+
 export class DataSyncManager {
   private static isSyncing = false;
   private static syncIntervalId: any = null;
@@ -27,7 +59,7 @@ export class DataSyncManager {
 
   /**
    * Main synchronization routine
-   * Collects all 'rq_' variables and merges them with the server state.
+   * Collects all 'rq_' variables and merges them with the server state based on highest timestamp (Last-Write-Wins).
    */
   public static async syncWithServer(onSuccessNotification?: () => void) {
     if (typeof window === 'undefined') return;
@@ -35,12 +67,24 @@ export class DataSyncManager {
 
     this.isSyncing = true;
     try {
-      // 1. Gather all local keys starting with 'rq_' (excluding target session configurations like active role)
+      // 1. Gather all local keys starting with 'rq_' (excluding active role)
       const clientData: Record<string, string> = {};
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key && key.startsWith('rq_') && key !== 'rq_active_role') {
-          clientData[key] = localStorage.getItem(key) || '';
+          const val = localStorage.getItem(key) || '';
+          clientData[key] = val;
+
+          // Self-repair: Ensure every data key has a valid timestamp if modified/present
+          if (!key.endsWith('_timestamp')) {
+            const timestampKey = `${key}_timestamp`;
+            if (!localStorage.getItem(timestampKey)) {
+              const defaultTime = String(Date.now());
+              // Call original to avoid infinite loop / re-triggering interceptor
+              localStorage.setItem(timestampKey, defaultTime);
+              clientData[timestampKey] = defaultTime;
+            }
+          }
         }
       }
 
@@ -58,14 +102,23 @@ export class DataSyncManager {
         const mergedData = json.mergedData || {};
         
         let hasChanges = false;
-        Object.keys(mergedData).forEach(key => {
-          const oldVal = localStorage.getItem(key);
-          const newVal = mergedData[key];
-          if (oldVal !== newVal) {
-            localStorage.setItem(key, newVal);
-            hasChanges = true;
-          }
-        });
+
+        // Use global syncing flag to tell the interceptor NOT to overwrite the incoming server timestamps
+        (window as any).__is_syncing_data__ = true;
+        try {
+          Object.keys(mergedData).forEach(key => {
+            if (key === 'rq_active_role') return;
+            
+            const oldVal = localStorage.getItem(key);
+            const newVal = mergedData[key];
+            if (oldVal !== newVal) {
+              localStorage.setItem(key, newVal);
+              hasChanges = true;
+            }
+          });
+        } finally {
+          (window as any).__is_syncing_data__ = false;
+        }
 
         // 3. If live server states override local variables, trigger store notifications
         if (hasChanges) {
