@@ -1,4 +1,5 @@
 import { AttendanceStatus } from '../types';
+import { DataSyncManager } from './sync';
 
 export interface Device {
   id: string;
@@ -154,8 +155,18 @@ export class AppStateStore {
     };
   }
 
-  private static notify() {
+  // 🔄 Remote Synchronization System for Cross-Device operations
+  public static notifyListenersOnly() {
     this.listeners.forEach(l => l());
+  }
+
+  public static async syncWithServer() {
+    await DataSyncManager.syncWithServer(() => this.notifyListenersOnly());
+  }
+
+  private static notify() {
+    this.notifyListenersOnly();
+    DataSyncManager.triggerImmediateSync(() => this.notifyListenersOnly());
   }
 
   // Active user role session management
@@ -1350,5 +1361,12 @@ export interface AdminActivityLog {
   resource: string;
   ipAddress: string;
   status: 'نجاح' | 'فشل';
+}
+
+// ⏱️ Auto-Sync Interval: Automatically sync with real-time server database every 3 seconds using the new DataSyncManager
+if (typeof window !== 'undefined') {
+  DataSyncManager.startAutoSync(() => {
+    AppStateStore.notifyListenersOnly();
+  }, 3000);
 }
 

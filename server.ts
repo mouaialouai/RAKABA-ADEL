@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
@@ -31,6 +32,115 @@ async function startServer() {
   // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  // Server-side State Persistence for cross-device synchronization (e.g. Teacher's mobile to Supervisor's Computer)
+  const DB_FILE = path.join("/tmp", "rq_server_db.json");
+  let serverStateStore: Record<string, string> = {};
+
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const raw = fs.readFileSync(DB_FILE, "utf-8");
+      serverStateStore = JSON.parse(raw);
+      console.log(`[Server DB] Successfully loaded persistent state from ${DB_FILE}`);
+    }
+  } catch (err) {
+    console.warn("[Server DB] Could not load JSON backup from file:", err);
+  }
+
+  function saveServerDB() {
+    try {
+      fs.writeFileSync(DB_FILE, JSON.stringify(serverStateStore, null, 2), "utf-8");
+    } catch (err) {
+      console.warn("[Server DB] Failed to persist state to file:", err);
+    }
+  }
+
+  function mergeStates(serverValue: string | undefined, clientValue: string): string {
+    if (!serverValue) return clientValue;
+    if (!clientValue) return serverValue;
+
+    try {
+      const serverObj = JSON.parse(serverValue);
+      const clientObj = JSON.parse(clientValue);
+
+      if (Array.isArray(serverObj) && Array.isArray(clientObj)) {
+        const testItem = serverObj[0] || clientObj[0];
+        if (testItem && typeof testItem === 'object') {
+          const idKey = ['id', 'code', 'learnerId', 'studentName', 'teacherName'].find(k => k in testItem);
+          if (idKey) {
+            const mergedMap = new Map();
+            
+            serverObj.forEach((item: any) => {
+              const key = item[idKey];
+              if (key !== undefined && key !== null) mergedMap.set(String(key), item);
+            });
+            
+            clientObj.forEach((item: any) => {
+              const key = item[idKey];
+              if (key !== undefined && key !== null) {
+                const existingItem = mergedMap.get(String(key));
+                if (existingItem) {
+                  mergedMap.set(String(key), { ...existingItem, ...item });
+                } else {
+                  mergedMap.set(String(key), item);
+                }
+              }
+            });
+            
+            return JSON.stringify(Array.from(mergedMap.values()));
+          }
+        }
+
+        const merged = [...serverObj];
+        clientObj.forEach((item: any) => {
+          if (!merged.some((existing: any) => JSON.stringify(existing) === JSON.stringify(item))) {
+            merged.push(item);
+          }
+        });
+        return JSON.stringify(merged);
+      } else if (typeof serverObj === 'object' && typeof clientObj === 'object' && serverObj !== null && clientObj !== null) {
+        return JSON.stringify({ ...serverObj, ...clientObj });
+      }
+    } catch (e) {
+      // JSON parse error fall-through
+    }
+
+    return clientValue;
+  }
+
+  app.post("/api/sync", (req, res) => {
+    try {
+      const { clientData } = req.body;
+      if (!clientData || typeof clientData !== "object") {
+        return res.status(400).json({ error: "Invalid client data representation" });
+      }
+
+      let updatedKeys = 0;
+      Object.keys(clientData).forEach(key => {
+        const clientVal = clientData[key];
+        const serverVal = serverStateStore[key];
+        const mergedVal = mergeStates(serverVal, clientVal);
+        
+        if (serverStateStore[key] !== mergedVal) {
+          serverStateStore[key] = mergedVal;
+          updatedKeys++;
+        }
+      });
+
+      if (updatedKeys > 0) {
+        saveServerDB();
+      }
+
+      res.json({ mergedData: serverStateStore });
+    } catch (err) {
+      console.error("[Sync API Error]", err);
+      res.status(500).json({ error: "Failed to sync server storage" });
+    }
+  });
+
+  app.get("/api/sync", (req, res) => {
+    res.json({ mergedData: serverStateStore });
   });
 
   // AI OCR and Text Extraction for Trainees
