@@ -1,0 +1,123 @@
+{
+  "entities": {
+    "Institution": {
+      "title": "Institution",
+      "description": "Details about the training institution",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "address": { "type": "string" },
+        "contactEmail": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "Specialization": {
+      "title": "Specialization",
+      "description": "Training specialization or major",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "level": { "type": "string" },
+        "qualification": { "type": "string" }
+      },
+      "required": ["name", "code"]
+    },
+    "Group": {
+      "title": "Group",
+      "description": "A specific class or group of trainees",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "specializationId": { "type": "string" },
+        "semester": { "type": "number" },
+        "academicYear": { "type": "string" },
+        "teacherId": { "type": "string" }
+      },
+      "required": ["name", "specializationId"]
+    },
+    "Trainee": {
+      "title": "Trainee",
+      "description": "Student or trainee profile",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "groupId": { "type": "string" },
+        "parentEmail": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "qrCode": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "suspended", "dropped", "graduated"] }
+      },
+      "required": ["name", "email", "groupId"]
+    },
+    "Teacher": {
+      "title": "Teacher",
+      "description": "Faculty or instructor profile",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "specializations": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["name", "email"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Record of trainee attendance for a session",
+      "type": "object",
+      "properties": {
+        "traineeId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["present", "absent", "excused", "suspended", "late"] },
+        "recordedBy": { "type": "string" }
+      },
+      "required": ["traineeId", "sessionId", "date", "status"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "A specific training session",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "startTime": { "type": "string", "format": "date-time" },
+        "endTime": { "type": "string", "format": "date-time" },
+        "subject": { "type": "string" }
+      },
+      "required": ["groupId", "teacherId", "startTime", "endTime"]
+    }
+  },
+  "firestore": {
+    "/institutions/{instId}": {
+      "schema": "Institution",
+      "description": "Global institution settings"
+    },
+    "/specializations/{specId}": {
+      "schema": "Specialization",
+      "description": "Specializations offered"
+    },
+    "/groups/{groupId}": {
+      "schema": "Group",
+      "description": "Trainee groups"
+    },
+    "/trainees/{traineeId}": {
+      "schema": "Trainee",
+      "description": "Trainee profiles"
+    },
+    "/teachers/{teacherId}": {
+      "schema": "Teacher",
+      "description": "Teacher profiles"
+    },
+    "/attendance/{attendanceId}": {
+      "schema": "Attendance",
+      "description": "Attendance logs"
+    },
+    "/sessions/{sessionId}": {
+      "schema": "Session",
+      "description": "Session schedules"
+    }
+  }
+}

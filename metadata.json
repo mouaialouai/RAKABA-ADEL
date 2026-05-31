@@ -1,0 +1,6 @@
+{
+  "name": "SmartStage DZ",
+  "description": "النظام الرقمي الذكي لمراقبة حضور ومطابقة تربصات المتمهنين في الوسط المهني بالجزائر باستخدام الجغرفة GPS والتحقق البيومتري للوجه والرموز السريعة QR.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
