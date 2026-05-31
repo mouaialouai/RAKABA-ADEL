@@ -632,6 +632,74 @@ export class AppStateStore {
     this.notify();
   }
 
+  // 📋 Teacher Absences (غيابات الأساتذة)
+  public static getTeacherAbsences(): any[] {
+    const saved = localStorage.getItem('rq_teacher_absences');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return [];
+      }
+    }
+    const initialAbsences = [
+      { id: '1', teacherName: 'أ. دليلة طهراوي', groupName: 'تطوير الويب الكامل', date: '2026-05-18', period: '13-15', reason: 'مهمة إدارية بمديرية التكوين', justified: true },
+      { id: '2', teacherName: 'أ. أمين بوجمعة', groupName: 'أمن الشبكات وحمايتها', date: '2026-05-19', period: '8-10', reason: 'شهادة طبية طارئة', justified: false }
+    ];
+    localStorage.setItem('rq_teacher_absences', JSON.stringify(initialAbsences));
+    return initialAbsences;
+  }
+
+  public static saveTeacherAbsences(absences: any[]) {
+    localStorage.setItem('rq_teacher_absences', JSON.stringify(absences));
+    this.notify();
+  }
+
+  // 📝 Workplace Inspection Reports (تقارير تفتيش الوسط المهني)
+  public static getWorkplaceInspectionReports(): any[] {
+    const saved = localStorage.getItem('rq_workplace_inspection_reports');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return [];
+      }
+    }
+    const initialReports = [
+      {
+        id: 'REP-001',
+        companyName: 'اتصالات الجزائر تبسة',
+        visitorName: 'أ. بوجمعة محمد السعيد',
+        studentName: 'أمين بلعيدي',
+        visitDate: '2026-05-20',
+        complianceScore: 'ممتاز',
+        reportDetails: 'خلال الزيارة الميدانية الفجائية لمقر المديرية العملية لاتصالات الجزائر، تم مراجعة دفتر التمهين المبرمج بالتنسيق مع المؤطر الخارجي م. عبد القادر. المتكون مستمر في تطبيق برنامج الصيانة والشبكات بشكل ممتاز والتحاقه يومي دون غيابات مسجلة.',
+        attachedPhotos: [
+          'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=600&q=80'
+        ]
+      },
+      {
+        id: 'REP-002',
+        companyName: 'مؤسسة سونلغاز للكهرباء والغاز',
+        visitorName: 'أ. موايعية عادل (مستشار التوجيه)',
+        studentName: 'أسامة قادري',
+        visitDate: '2026-05-24',
+        complianceScore: 'مستقر',
+        reportDetails: 'تفقد ورشة الصيانة الكهربائية بسونلغاز وتبين أن المتكون أسامة قادري يتلقى توجيهاً جيداً، مع الالتزام بكافة تبريرات الأمن وقواعد السلامة المعتمدة. لوحظ تأخر بضع دقائق في مطلع الأسبوع وجرى التنبيه شفهياً بمرافقة المشرف الميداني.',
+        attachedPhotos: [
+          'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?auto=format&fit=crop&w=600&q=80'
+        ]
+      }
+    ];
+    localStorage.setItem('rq_workplace_inspection_reports', JSON.stringify(initialReports));
+    return initialReports;
+  }
+
+  public static saveWorkplaceInspectionReports(reports: any[]) {
+    localStorage.setItem('rq_workplace_inspection_reports', JSON.stringify(reports));
+    this.notify();
+  }
+
   // 📝 Remote Attendance Logs (سجلات الحضور عن بعد للوسط المهني)
   public static getRemoteAttendanceLogs(): RemoteAttendanceLog[] {
     const saved = localStorage.getItem('rq_remote_attendance_logs');

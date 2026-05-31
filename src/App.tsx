@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import Sidebar from './components/layout/Sidebar';
 import Topbar from './components/layout/Topbar';
@@ -16,6 +16,7 @@ import { ShieldAlert } from 'lucide-react';
 
 // Access Denied Shield Component
 function AccessDenied() {
+  const navigate = useNavigate();
   return (
     <div className="flex flex-col items-center justify-center p-12 bg-white border border-slate-200 rounded-3xl shadow-sm text-center max-w-md mx-auto my-12 text-right space-y-4">
       <div className="p-3 bg-rose-50 border border-rose-100 rounded-2xl text-rose-500">
@@ -28,7 +29,7 @@ function AccessDenied() {
       <button 
         onClick={() => {
           AppStateStore.setActiveRole('none');
-          window.location.href = '/';
+          navigate('/');
         }}
         className="px-6 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl"
       >
@@ -50,7 +51,11 @@ export default function App() {
 
   // Root authentication flow
   if (activeRole === 'none') {
-    return <PortalLogin />;
+    return (
+      <BrowserRouter>
+        <PortalLogin />
+      </BrowserRouter>
+    );
   }
 
   // Routing checks mapping roles

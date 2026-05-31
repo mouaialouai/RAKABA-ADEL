@@ -138,13 +138,7 @@ export default function SupervisionDashboard() {
   const [showSessionImportArea, setShowSessionImportArea] = useState(false);
 
   // Persistence for teacher absences
-  const [teacherAbsences, setTeacherAbsences] = useState<any[]>(() => {
-    const saved = localStorage.getItem('rq_teacher_absences');
-    return saved ? JSON.parse(saved) : [
-      { id: '1', teacherName: 'أ. دليلة طهراوي', groupName: 'تطوير الويب الكامل', date: '2026-05-18', period: '13-15', reason: 'مهمة إدارية بمديرية التكوين', justified: true },
-      { id: '2', teacherName: 'أ. أمين بوجمعة', groupName: 'أمن الشبكات وحمايتها', date: '2026-05-19', period: '8-10', reason: 'شهادة طبية طارئة', justified: false }
-    ];
-  });
+  const [teacherAbsences, setTeacherAbsences] = useState<any[]>(() => AppStateStore.getTeacherAbsences());
 
   // State for recording a teacher absence
   const [isAddingAbsence, setIsAddingAbsence] = useState(false);
@@ -188,20 +182,20 @@ export default function SupervisionDashboard() {
 
   const [companiesList, setCompaniesList] = useState(() => AppStateStore.getWorkplaceCompanies());
 
-  // Saving helpers to localStorage:
+  // Saving helpers syncing with AppStateStore to notify subscribers:
   const saveContractsList = (newList: any) => {
     setContractsList(newList);
-    localStorage.setItem('rq_workplace_contracts', JSON.stringify(newList));
+    AppStateStore.saveWorkplaceContracts(newList);
   };
   
   const saveVisitsList = (newList: any) => {
     setVisitsList(newList);
-    localStorage.setItem('rq_workplace_visits', JSON.stringify(newList));
+    AppStateStore.saveWorkplaceVisits(newList);
   };
 
   const saveCompaniesList = (newList: any) => {
     setCompaniesList(newList);
-    localStorage.setItem('rq_workplace_companies', JSON.stringify(newList));
+    AppStateStore.saveWorkplaceCompanies(newList);
   };
 
   // Centralized SmartStage DZ Live Logs and SMS states
@@ -214,6 +208,12 @@ export default function SupervisionDashboard() {
       setRemoteLogs(AppStateStore.getRemoteAttendanceLogs());
       setSmsLogs(AppStateStore.getSmsLogs());
       setAuthorizedPartners(AppStateStore.getAuthorizedPartners());
+      setTeacherAbsences(AppStateStore.getTeacherAbsences());
+      setContractsList(AppStateStore.getWorkplaceContracts());
+      setVisitsList(AppStateStore.getWorkplaceVisits());
+      setCompaniesList(AppStateStore.getWorkplaceCompanies());
+      setReferralList(AppStateStore.getDisciplinaryReferrals());
+      setInspectionReports(AppStateStore.getWorkplaceInspectionReports());
     });
     return unsub;
   }, []);
@@ -236,35 +236,7 @@ export default function SupervisionDashboard() {
   const [newCompany, setNewCompany] = useState({ name: '', apprenticesCount: 1, rating: 4, compliance: 'ممتاز', feedback: '' });
 
   // 📋 Professional Workplace Inspection Reports (تقارير تفتيش الوسط المهني)
-  const [inspectionReports, setInspectionReports] = useState<any[]>(() => {
-    const saved = localStorage.getItem('rq_workplace_inspection_reports');
-    return saved ? JSON.parse(saved) : [
-      {
-        id: 'REP-001',
-        companyName: 'اتصالات الجزائر تبسة',
-        visitorName: 'أ. بوجمعة محمد السعيد',
-        studentName: 'أمين بلعيدي',
-        visitDate: '2026-05-20',
-        complianceScore: 'ممتاز',
-        reportDetails: 'خلال الزيارة الميدانية الفجائية لمقر المديرية العملية لاتصالات الجزائر، تم مراجعة دفتر التمهين المبرمج بالتنسيق مع المؤطر الخارجي م. عبد القادر. المتكون مستمر في تطبيق برنامج الصيانة والشبكات بشكل ممتاز والتحاقه يومي دون غيابات مسجلة.',
-        attachedPhotos: [
-          'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=600&q=80'
-        ]
-      },
-      {
-        id: 'REP-002',
-        companyName: 'مؤسسة سونلغاز للكهرباء والغاز',
-        visitorName: 'أ. موايعية عادل (مستشار التوجيه)',
-        studentName: 'أسامة قادري',
-        visitDate: '2026-05-24',
-        complianceScore: 'مستقر',
-        reportDetails: 'تفقد ورشة الصيانة الكهربائية بسونلغاز وتبين أن المتكون أسامة قادري يتلقى توجيهاً جيداً، مع الالتزام بكافة تبريرات الأمن وقواعد السلامة المعتمدة. لوحظ تأخر بضع دقائق في مطلع الأسبوع وجرى التنبيه شفهياً بمرافقة المشرف الميداني.',
-        attachedPhotos: [
-          'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?auto=format&fit=crop&w=600&q=80'
-        ]
-      }
-    ];
-  });
+  const [inspectionReports, setInspectionReports] = useState<any[]>(() => AppStateStore.getWorkplaceInspectionReports());
 
   const [showAddReportForm, setShowAddReportForm] = useState(false);
   const [newReport, setNewReport] = useState<{
@@ -287,7 +259,7 @@ export default function SupervisionDashboard() {
 
   const saveInspectionReports = (newList: any[]) => {
     setInspectionReports(newList);
-    localStorage.setItem('rq_workplace_inspection_reports', JSON.stringify(newList));
+    AppStateStore.saveWorkplaceInspectionReports(newList);
   };
 
   const handleInspectionPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {

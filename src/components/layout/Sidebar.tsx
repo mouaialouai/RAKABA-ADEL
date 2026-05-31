@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   ShieldCheck, 
@@ -38,6 +38,7 @@ const roleNames = {
 };
 
 export default function Sidebar() {
+  const navigate = useNavigate();
   const [activeRole, setActiveRole] = useState<'admin' | 'supervisor' | 'teacher' | 'trainee' | 'parent' | 'none'>(AppStateStore.getActiveRole());
   const [institute, setInstitute] = useState(() => AppStateStore.getInstitutionInfo());
 
@@ -58,7 +59,7 @@ export default function Sidebar() {
 
   const handleLogout = () => {
     AppStateStore.setActiveRole('none');
-    window.location.href = '/';
+    navigate('/');
   };
 
   return (

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { 
   UserCheck, 
@@ -27,6 +28,7 @@ interface RoleOption {
 }
 
 export default function PortalLogin() {
+  const navigate = useNavigate();
   const [selectedRole, setSelectedRole] = useState<RoleOption | null>(null);
   const [password, setPassword] = useState('');
   const [errorMess, setErrorMess] = useState('');
@@ -181,11 +183,11 @@ export default function PortalLogin() {
     AppStateStore.setActiveRole(roleKey);
     
     // Redirect depend on context
-    if (roleKey === 'admin') window.location.href = '/admin';
-    else if (roleKey === 'supervisor') window.location.href = '/supervision';
-    else if (roleKey === 'teacher') window.location.href = '/teacher';
-    else if (roleKey === 'parent') window.location.href = '/parent';
-    else if (roleKey === 'trainee') window.location.href = '/trainee';
+    if (roleKey === 'admin') navigate('/admin');
+    else if (roleKey === 'supervisor') navigate('/supervision');
+    else if (roleKey === 'teacher') navigate('/teacher');
+    else if (roleKey === 'parent') navigate('/parent');
+    else if (roleKey === 'trainee') navigate('/trainee');
   };
 
   const activeGroupForLearners = groups.find(g => g.id === selectedGroupId);
