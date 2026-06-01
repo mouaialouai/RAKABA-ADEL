@@ -15,7 +15,7 @@ import {
   onSnapshot, 
   writeBatch 
 } from "firebase/firestore";
-import firebaseConfig from "../../firebase-applet-config.json";
+import firebaseConfig from "./firebase-applet-config";
 
 // 🛡️ Global Storage Interception & Timestamp Automation
 if (typeof window !== 'undefined' && !(window as any).__storage_intercepted__) {
@@ -58,7 +58,10 @@ let firebaseInitialized = false;
 
 try {
   firebaseApp = initializeApp(firebaseConfig);
-  db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+  const dbId = firebaseConfig.firestoreDatabaseId;
+  db = (dbId && dbId !== '(default)' && dbId !== '')
+    ? getFirestore(firebaseApp, dbId)
+    : getFirestore(firebaseApp);
   auth = getAuth(firebaseApp);
   firebaseInitialized = true;
   console.log("[DataSyncManager] Standard Cloud Database client initialized successfully.");
