@@ -23,6 +23,7 @@ import {
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppStateStore, SpecializationGroup, TrainingMode, Learner } from '../../services/store';
+import { DataSyncManager } from '../../services/sync';
 
 export default function TrainingStructure() {
   const [modes, setModes] = useState<TrainingMode[]>([]);
@@ -118,7 +119,9 @@ export default function TrainingStructure() {
         code: formData.code || undefined,
         ...(finalLearners.length > 0 ? { learners: finalLearners } : {})
       });
-      alert('تم تحديث بيانات التخصص والفوج بنجاح.');
+      // Trigger instant backend synchronization to propagate changes to other devices
+      DataSyncManager.triggerImmediateSync();
+      alert('تم تحديث بيانات التخصص والفوج بنجاح وبدء المزامنة الفورية.');
     } else {
       // Add new
       AppStateStore.addGroup({
@@ -137,7 +140,9 @@ export default function TrainingStructure() {
           { id: 'L-N03', name: 'سليم جفال', gender: 'M', status: 'active' }
         ]
       });
-      alert('تم إضافة التخصص الجديد وتوليد الفوج/الفرع بنجاح.');
+      // Trigger instant backend synchronization to propagate changes to other devices
+      DataSyncManager.triggerImmediateSync();
+      alert('تم إضافة التخصص الجديد وتوليد الفوج/الفرع بنجاح وبدء المزامنة الفورية.');
     }
 
     // Reset and close
@@ -187,6 +192,7 @@ export default function TrainingStructure() {
 
   const handleDeleteGroup = (id: string) => {
     AppStateStore.deleteGroup(id);
+    DataSyncManager.triggerImmediateSync();
     setDeleteGroupConfirmId(null);
   };
 
@@ -329,6 +335,7 @@ export default function TrainingStructure() {
       const newMode = { id: `M-${Date.now()}`, name: modeName, devices: [] };
       AppStateStore.saveModes([...modes, newMode]);
     }
+    DataSyncManager.triggerImmediateSync();
     setIsModeModalOpen(false);
     setModeName('');
     setEditingModeId(null);
@@ -337,6 +344,7 @@ export default function TrainingStructure() {
   const handleDeleteMode = (id: string) => {
     const filtered = modes.filter(m => m.id !== id);
     AppStateStore.saveModes(filtered);
+    DataSyncManager.triggerImmediateSync();
     setDeleteModeConfirmId(null);
   };
 
@@ -356,6 +364,7 @@ export default function TrainingStructure() {
     });
 
     AppStateStore.saveModes(updated);
+    DataSyncManager.triggerImmediateSync();
     setIsDeviceModalOpen(false);
     setDeviceName('');
     setTargetModeId(null);
@@ -372,6 +381,7 @@ export default function TrainingStructure() {
       return m;
     });
     AppStateStore.saveModes(updated);
+    DataSyncManager.triggerImmediateSync();
     setDeleteDeviceConfirmId(null);
   };
 
