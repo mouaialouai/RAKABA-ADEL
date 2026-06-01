@@ -1423,11 +1423,20 @@ export interface AdminActivityLog {
   status: 'نجاح' | 'فشل';
 }
 
-// ⏱️ Auto-Sync Interval: Automatically sync with real-time server database every 3 seconds using the new DataSyncManager
+// ⏱️ Auto-Sync & Realtime Event Stream Setup:
+// Combines sub-second Server-Sent Events (SSE) stream notifications for instant push updates
+// alongside a gentle 10-second polling fallback task for offline restoration and ultimate robustness.
 if (typeof window !== 'undefined') {
   AppStateStore.initializeAllDefaults();
+  
+  // 🟢 1. Sub-second SSE Push Link
+  DataSyncManager.startRealtimeStream(() => {
+    AppStateStore.notifyListenersOnly();
+  });
+
+  // 🔵 2. Periodic robust background sync block (adjusted to 10s to lower load, as SSE handles the sub-second updates)
   DataSyncManager.startAutoSync(() => {
     AppStateStore.notifyListenersOnly();
-  }, 3000);
+  }, 10000);
 }
 

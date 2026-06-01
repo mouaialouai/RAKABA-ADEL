@@ -188,6 +188,38 @@ async function startServer() {
     return clientValue;
   }
 
+  // SSE (Server-Sent Events) clients keeping an active network stream connection for instant broadcasts
+  const activeStreamClients = new Set<express.Response>();
+
+  function broadcastSync(data: Record<string, string>) {
+    const payload = JSON.stringify({ mergedData: data });
+    activeStreamClients.forEach(client => {
+      try {
+        client.write(`data: ${payload}\n\n`);
+      } catch (err) {
+        // Safe removal if connection is stale, closed or broken
+        activeStreamClients.delete(client);
+      }
+    });
+  }
+
+  app.get("/api/sync-stream", (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    // Prevent nginx / reverse-proxy buffering of response stream:
+    res.setHeader("X-Accel-Buffering", "no");
+
+    // Immediately push the current system-wide synchronized state to the newly connected endpoint
+    res.write(`data: ${JSON.stringify({ mergedData: serverStateStore })}\n\n`);
+
+    activeStreamClients.add(res);
+
+    req.on("close", () => {
+      activeStreamClients.delete(res);
+    });
+  });
+
   app.post("/api/sync", (req, res) => {
     try {
       const { clientData } = req.body;
@@ -296,6 +328,7 @@ async function startServer() {
 
       if (updatedKeys > 0 || clientData['rq_tombstones']) {
         saveServerDB();
+        broadcastSync(serverStateStore);
       }
 
       res.json({ mergedData: serverStateStore });

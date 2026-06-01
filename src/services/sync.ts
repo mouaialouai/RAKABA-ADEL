@@ -39,6 +39,7 @@ if (typeof window !== 'undefined' && !(window as any).__storage_intercepted__) {
 export class DataSyncManager {
   private static isSyncing = false;
   private static syncIntervalId: any = null;
+  private static eventSource: EventSource | null = null;
   private static listeners = new Set<() => void>();
 
   public static subscribe(listener: () => void) {
@@ -167,6 +168,73 @@ export class DataSyncManager {
     if (this.syncIntervalId) {
       clearInterval(this.syncIntervalId);
       this.syncIntervalId = null;
+    }
+  }
+
+  /**
+   * Realtime Event Streaming connection using standard Server-Sent Events (SSE)
+   */
+  public static startRealtimeStream(onSuccessNotification: () => void) {
+    if (typeof window === 'undefined') return;
+    if (this.eventSource) return;
+
+    const establishSSE = () => {
+      // Create server-sent-event connection
+      const es = new EventSource('/api/sync-stream');
+      this.eventSource = es;
+
+      es.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(event.data);
+          const mergedData = parsed.mergedData || {};
+          let hasChanges = false;
+
+          (window as any).__is_syncing_data__ = true;
+          try {
+            Object.keys(mergedData).forEach(key => {
+              if (key === 'rq_active_role') return;
+
+              const oldVal = localStorage.getItem(key);
+              const newVal = mergedData[key];
+              if (oldVal !== newVal) {
+                localStorage.setItem(key, newVal);
+                hasChanges = true;
+              }
+            });
+          } finally {
+            (window as any).__is_syncing_data__ = false;
+          }
+
+          if (hasChanges) {
+            if (onSuccessNotification) {
+              onSuccessNotification();
+            }
+            this.notifyListeners();
+          }
+        } catch (e) {
+          console.error("[DataSyncManager] Error parsing realtime update payload:", e);
+        }
+      };
+
+      es.onerror = (err) => {
+        console.warn("[DataSyncManager] Realtime Stream disconnected. Reconnecting in 3 seconds...", err);
+        es.close();
+        if (this.eventSource === es) {
+          this.eventSource = null;
+        }
+        setTimeout(() => {
+          if (!this.eventSource) establishSSE();
+        }, 3000);
+      };
+    };
+
+    establishSSE();
+  }
+
+  public static stopRealtimeStream() {
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
     }
   }
 }
