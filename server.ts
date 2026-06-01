@@ -35,14 +35,23 @@ async function startServer() {
   });
 
   // Server-side State Persistence for cross-device synchronization (e.g. Teacher's mobile to Supervisor's Computer)
-  const DB_FILE = path.join("/tmp", "rq_server_db.json");
+  const DB_FILE_TMP = path.join("/tmp", "rq_server_db.json");
+  const DB_FILE_WORKSPACE = path.join(process.cwd(), "rq_server_db.json");
+  const DB_FILE = DB_FILE_WORKSPACE;
+  
   let serverStateStore: Record<string, string> = {};
 
   try {
-    if (fs.existsSync(DB_FILE)) {
-      const raw = fs.readFileSync(DB_FILE, "utf-8");
+    if (fs.existsSync(DB_FILE_WORKSPACE)) {
+      const raw = fs.readFileSync(DB_FILE_WORKSPACE, "utf-8");
       serverStateStore = JSON.parse(raw);
-      console.log(`[Server DB] Successfully loaded persistent state from ${DB_FILE}`);
+      console.log(`[Server DB] Successfully loaded persistent state from workspace: ${DB_FILE_WORKSPACE}`);
+    } else if (fs.existsSync(DB_FILE_TMP)) {
+      const raw = fs.readFileSync(DB_FILE_TMP, "utf-8");
+      serverStateStore = JSON.parse(raw);
+      console.log(`[Server DB] Migrated persistent state from absolute tmp storage: ${DB_FILE_TMP}`);
+      // Write to workspace right away to commit migration
+      fs.writeFileSync(DB_FILE_WORKSPACE, JSON.stringify(serverStateStore, null, 2), "utf-8");
     }
   } catch (err) {
     console.warn("[Server DB] Could not load JSON backup from file:", err);
@@ -51,6 +60,7 @@ async function startServer() {
   function saveServerDB() {
     try {
       fs.writeFileSync(DB_FILE, JSON.stringify(serverStateStore, null, 2), "utf-8");
+      console.log("[Server DB] Saved state to database file in workspace root.");
     } catch (err) {
       console.warn("[Server DB] Failed to persist state to file:", err);
     }

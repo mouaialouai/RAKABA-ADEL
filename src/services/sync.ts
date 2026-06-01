@@ -80,7 +80,7 @@ export class DataSyncManager {
           if (!key.endsWith('_timestamp')) {
             const timestampKey = `${key}_timestamp`;
             if (!localStorage.getItem(timestampKey)) {
-              const defaultTime = String(Date.now());
+              const defaultTime = '1';
               // Call original to avoid infinite loop / re-triggering interceptor
               localStorage.setItem(timestampKey, defaultTime);
               clientData[timestampKey] = defaultTime;
