@@ -89,7 +89,7 @@ async function startServer() {
     return 0;
   }
 
-  function mergeStates(serverValue: string | undefined, clientValue: string): string {
+  function mergeStates(serverValue: string | undefined, clientValue: string, serverTime: number, clientTime: number): string {
     if (!serverValue) return clientValue;
     if (!clientValue) return serverValue;
 
@@ -133,8 +133,8 @@ async function startServer() {
                 const existingItem = mergedMap.get(key);
                 if (existingItem) {
                   // Core resolve: check if existing (server) item is newer or client is newer
-                  const tServer = getObjectTimestamp(existingItem);
-                  const tClient = getObjectTimestamp(item);
+                  const tServer = getObjectTimestamp(existingItem) || serverTime;
+                  const tClient = getObjectTimestamp(item) || clientTime;
 
                   let mergedItem;
                   if (tServer > tClient) {
@@ -229,7 +229,7 @@ async function startServer() {
         // Perform advanced JSON-level merging
         let mergedVal = clientVal;
         if (serverVal !== undefined) {
-          mergedVal = mergeStates(serverVal, clientVal);
+          mergedVal = mergeStates(serverVal, clientVal, serverTime, clientTime);
         }
 
         // Apply tombstones to the merged array to filter deleted items out

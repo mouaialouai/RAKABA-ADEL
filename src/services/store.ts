@@ -33,6 +33,7 @@ export interface SpecializationGroup {
   code: string; // رمز الفوج أو الفرع
   learners: Learner[]; // قائمة المتكونين
   isListApproved?: boolean; // هل تم اعتماد وموافقة القائمة من الرقابة العامة
+  updatedAt?: string;
 }
 
 export interface AttendanceSession {
@@ -283,7 +284,8 @@ export class AppStateStore {
       ...group,
       id,
       code,
-      learners: group.learners || []
+      learners: group.learners || [],
+      updatedAt: new Date().toISOString()
     };
 
     groups.push(newGroup);
@@ -298,7 +300,8 @@ export class AppStateStore {
     if (index !== -1) {
       groups[index] = {
         ...groups[index],
-        ...updatedFields
+        ...updatedFields,
+        updatedAt: new Date().toISOString()
       };
       this.saveGroups(groups);
       return true;
@@ -310,6 +313,13 @@ export class AppStateStore {
   public static deleteGroup(id: string) {
     const groups = this.getGroups();
     const filtered = groups.filter(g => g.id !== id);
+    
+    this.addTombstone('rq_groups', id);
+    
+    // Also clean up and add tombstones for sessions associated with this group
+    const targetSessionIds = this.getSessions().filter(s => s.groupId === id).map(s => s.id);
+    targetSessionIds.forEach(sid => this.addTombstone('rq_sessions', sid));
+    
     this.saveGroups(filtered);
     
     // Also cleanup sessions
@@ -1039,6 +1049,7 @@ export class AppStateStore {
   public static deleteSnapshot(id: string): boolean {
     const snapshots = this.getDatabaseSnapshots();
     const remaining = snapshots.filter(s => s.id !== id);
+    this.addTombstone('rq_db_snapshots', id);
     localStorage.setItem('rq_db_snapshots', JSON.stringify(remaining));
     this.addAdminActivityLog('حذف ملف لقطة سحابية', `الملف المستهدف: ID ${id}`);
     this.notify();
