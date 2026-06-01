@@ -81,9 +81,22 @@ async function startServer() {
     if (!serverValue) return clientValue;
     if (!clientValue) return serverValue;
 
+    const trimmedServer = serverValue.trim();
+    const trimmedClient = clientValue.trim();
+
+    // Only attempt JSON parsing and merging if both values look like JSON arrays or objects
+    const isServerJson = (trimmedServer.startsWith("{") && trimmedServer.endsWith("}")) || 
+                         (trimmedServer.startsWith("[") && trimmedServer.endsWith("]"));
+    const isClientJson = (trimmedClient.startsWith("{") && trimmedClient.endsWith("}")) || 
+                         (trimmedClient.startsWith("[") && trimmedClient.endsWith("]"));
+
+    if (!isServerJson || !isClientJson) {
+      return clientValue;
+    }
+
     try {
-      const serverObj = JSON.parse(serverValue);
-      const clientObj = JSON.parse(clientValue);
+      const serverObj = JSON.parse(trimmedServer);
+      const clientObj = JSON.parse(trimmedClient);
 
       // If both are arrays, do a smart item-by-item merge
       if (Array.isArray(serverObj) && Array.isArray(clientObj)) {
@@ -137,7 +150,7 @@ async function startServer() {
         return JSON.stringify({ ...serverObj, ...clientObj });
       }
     } catch (e) {
-      console.error("[Merge Error]", e);
+      // Avoid printing SyntaxError since some keys might accidentally match the JSON criteria or have minor issues.
     }
 
     return clientValue;
@@ -198,43 +211,46 @@ async function startServer() {
         }
 
         // Apply tombstones to the merged array to filter deleted items out
-        try {
-          let parsedMerged = JSON.parse(mergedVal);
-          
-          // Filter top-level arrays
-          if (Array.isArray(parsedMerged)) {
-            const deletedIds = mergedTombstones[key] || [];
-            const sample = parsedMerged[0];
-            const idKey = sample ? (['id', 'code', 'learnerId', 'studentName', 'teacherName', 'key'].find(k => k in sample) || 'id') : 'id';
+        const trimmedMerged = mergedVal.trim();
+        if ((trimmedMerged.startsWith("[") && trimmedMerged.endsWith("]")) || (trimmedMerged.startsWith("{") && trimmedMerged.endsWith("}"))) {
+          try {
+            let parsedMerged = JSON.parse(trimmedMerged);
             
-            let filtered = parsedMerged.filter((item: any) => {
-              if (item && typeof item === 'object') {
-                const itemKey = String(item[idKey] || '');
-                return !deletedIds.includes(itemKey);
-              }
-              return true;
-            });
+            // Filter top-level arrays
+            if (Array.isArray(parsedMerged)) {
+              const deletedIds = mergedTombstones[key] || [];
+              const sample = parsedMerged[0];
+              const idKey = sample ? (['id', 'code', 'learnerId', 'studentName', 'teacherName', 'key'].find(k => k in sample) || 'id') : 'id';
+              
+              let filtered = parsedMerged.filter((item: any) => {
+                if (item && typeof item === 'object') {
+                  const itemKey = String(item[idKey] || '');
+                  return !deletedIds.includes(itemKey);
+                }
+                return true;
+              });
 
-            // Filter nested learners in groups
-            if (key === 'rq_groups') {
-              const deletedLearners = mergedTombstones['rq_learners'] || [];
-              if (deletedLearners.length > 0) {
-                filtered = filtered.map((g: any) => {
-                  if (g && Array.isArray(g.learners)) {
-                    return {
-                      ...g,
-                      learners: g.learners.filter((l: any) => !deletedLearners.includes(String(l.id)))
-                    };
-                  }
-                  return g;
-                });
+              // Filter nested learners in groups
+              if (key === 'rq_groups') {
+                const deletedLearners = mergedTombstones['rq_learners'] || [];
+                if (deletedLearners.length > 0) {
+                  filtered = filtered.map((g: any) => {
+                    if (g && Array.isArray(g.learners)) {
+                      return {
+                        ...g,
+                        learners: g.learners.filter((l: any) => !deletedLearners.includes(String(l.id)))
+                      };
+                    }
+                    return g;
+                  });
+                }
               }
+
+              mergedVal = JSON.stringify(filtered);
             }
-
-            mergedVal = JSON.stringify(filtered);
+          } catch (e) {
+            // Fallback to mergedVal
           }
-        } catch (e) {
-          // Fallback to mergedVal
         }
 
         // Overwrite or update if has actual difference
