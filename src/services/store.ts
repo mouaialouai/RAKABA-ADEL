@@ -1262,6 +1262,37 @@ export class AppStateStore {
     this.addAdminActivityLog('إعادة تهيئة وضبط النظام الكلي ⚠️', 'تفريغ وتطهير قاعدة البيانات الفورية لبدء سداسي بيداغوجي جديد من الصفر');
     this.notify();
   }
+
+  // INITIALIZE DYNAMIC DEFAULTS
+  public static initializeAllDefaults() {
+    if (typeof window === 'undefined') return;
+    
+    (window as any).__is_initializing_default__ = true;
+    try {
+      this.getModes();
+      this.getGroups();
+      this.getSessions();
+      this.getDisciplinaryReferrals();
+      this.getInstitutionInfo();
+      this.getSemesterResults();
+      this.getGradeAppeals();
+      this.getWorkplaceContracts();
+      this.getWorkplaceVisits();
+      this.getWorkplaceCompanies();
+      this.getTeacherAbsences();
+      this.getWorkplaceInspectionReports();
+      this.getRemoteAttendanceLogs();
+      this.getSimulatedSMSLogs();
+      this.getAuthorizedPartners();
+      this.getOfflineQueue();
+      this.getDatabaseSnapshots();
+      this.getAdminActivityLogs();
+    } catch (e) {
+      console.error("[Initializer error]", e);
+    } finally {
+      (window as any).__is_initializing_default__ = false;
+    }
+  }
 }
 
 export interface InstitutionInfo {
@@ -1394,6 +1425,7 @@ export interface AdminActivityLog {
 
 // ⏱️ Auto-Sync Interval: Automatically sync with real-time server database every 3 seconds using the new DataSyncManager
 if (typeof window !== 'undefined') {
+  AppStateStore.initializeAllDefaults();
   DataSyncManager.startAutoSync(() => {
     AppStateStore.notifyListenersOnly();
   }, 3000);

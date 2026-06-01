@@ -17,7 +17,8 @@ if (typeof window !== 'undefined' && !(window as any).__storage_intercepted__) {
       !key.endsWith('_timestamp') &&
       !(window as any).__is_syncing_data__
     ) {
-      originalSetItem.call(localStorage, `${key}_timestamp`, String(Date.now()));
+      const timestamp = (window as any).__is_initializing_default__ ? '1' : String(Date.now());
+      originalSetItem.call(localStorage, `${key}_timestamp`, timestamp);
     }
   };
 
