@@ -169,6 +169,22 @@ export class AppStateStore {
     DataSyncManager.triggerImmediateSync(() => this.notifyListenersOnly());
   }
 
+  public static addTombstone(key: string, id: string) {
+    try {
+      const saved = localStorage.getItem('rq_tombstones');
+      const tombstones = saved ? JSON.parse(saved) : {};
+      if (!tombstones[key]) {
+        tombstones[key] = [];
+      }
+      if (!tombstones[key].includes(id)) {
+        tombstones[key].push(id);
+      }
+      localStorage.setItem('rq_tombstones', JSON.stringify(tombstones));
+    } catch (e) {
+      console.error("[Tombstone registration error]", e);
+    }
+  }
+
   // Active user role session management
   public static getActiveRole(): 'admin' | 'supervisor' | 'teacher' | 'trainee' | 'parent' | 'none' {
     const role = localStorage.getItem('rq_active_role');
@@ -1127,6 +1143,7 @@ export class AppStateStore {
     
     if (groups[groupIdx].learners.length < initialLength) {
       this.saveGroups(groups);
+      this.addTombstone('rq_learners', traineeId);
       this.addAdminActivityLog('حذف متكون بصفة نهائية', `المتكون: ${traineeId} من الفوج ${groups[groupIdx].name}`);
       return true;
     }
@@ -1140,8 +1157,8 @@ export class AppStateStore {
     const initialLength = companies.length;
     const remains = companies.filter(c => c.id !== companyId);
     if (remains.length < initialLength) {
-      localStorage.setItem('rq_workplace_companies', JSON.stringify(remains));
-      this.notify();
+      this.saveWorkplaceCompanies(remains);
+      this.addTombstone('rq_workplace_companies', companyId);
       this.addAdminActivityLog('حذف مؤسسة مستقبلة', `المؤسسة: ${targetComp?.name || companyId}`);
       return true;
     }
@@ -1155,8 +1172,8 @@ export class AppStateStore {
     const initialLength = sessions.length;
     const remains = sessions.filter(s => s.id !== sessionId);
     if (remains.length < initialLength) {
-      localStorage.setItem('rq_sessions', JSON.stringify(remains));
-      this.notify();
+      this.saveSessions(remains);
+      this.addTombstone('rq_sessions', sessionId);
       this.addAdminActivityLog('حذف سجل حضور الحصة الدراسية', `رقم الحصة: ${sessionId} (تاريخ: ${targetSess?.date || ''})`);
       return true;
     }
@@ -1170,8 +1187,8 @@ export class AppStateStore {
     const initialLength = referrals.length;
     const remains = referrals.filter(r => r.id !== referralId);
     if (remains.length < initialLength) {
-      localStorage.setItem('rq_disciplinary_referrals', JSON.stringify(remains));
-      this.notify();
+      this.saveDisciplinaryReferrals(remains);
+      this.addTombstone('rq_disciplinary_referrals', referralId);
       this.addAdminActivityLog('حذف تقرير إحالة للجنة الانضباط', `رقم الإحالة للجن: ${referralId} (المتكون: ${targetRef?.learnerName || ''})`);
       return true;
     }
@@ -1186,6 +1203,7 @@ export class AppStateStore {
     const remains = appeals.filter(a => a.id !== appealId);
     if (remains.length < initialLength) {
       this.saveGradeAppeals(remains);
+      this.addTombstone('rq_grade_appeals', appealId);
       this.addAdminActivityLog('حذف طعن في النقطة', `رقم الطعن: ${appealId} (المتكون: ${targetApp?.learnerName || ''})`);
       return true;
     }
@@ -1199,8 +1217,8 @@ export class AppStateStore {
     const initialLength = logs.length;
     const remains = logs.filter(l => l.id !== logId);
     if (remains.length < initialLength) {
-      localStorage.setItem('rq_remote_attendance_logs', JSON.stringify(remains));
-      this.notify();
+      this.saveRemoteAttendanceLogs(remains);
+      this.addTombstone('rq_remote_attendance_logs', logId);
       this.addAdminActivityLog('حذف سجل حضور ميداني (GPS/QR)', `رقم الحضور: ${logId} (المتكون: ${targetLog?.learnerName || ''})`);
       return true;
     }

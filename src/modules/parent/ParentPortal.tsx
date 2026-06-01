@@ -170,6 +170,14 @@ export default function ParentPortal() {
   const [appealReason, setAppealReason] = useState('');
   const [appealSuccess, setAppealSuccess] = useState('');
 
+  React.useEffect(() => {
+    const unsub = AppStateStore.subscribe(() => {
+      setSessions(AppStateStore.getSessions().filter(s => s.groupId === activeGroup.id));
+      setAppeals(AppStateStore.getGradeAppeals().filter(a => a.learnerId === student.id));
+    });
+    return unsub;
+  }, [activeGroup.id, student.id]);
+
   // Handler to upload document justification
   const handleUploadJustification = (sessionId: string, learnerId: string, fileName: string) => {
     const allSessions = AppStateStore.getSessions();

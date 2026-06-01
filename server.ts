@@ -56,6 +56,93 @@ async function startServer() {
     }
   }
 
+  function mergeArraysPrimitiveOrObj(arrA: any[], arrB: any[]): any[] {
+    const sample = arrA[0] || arrB[0];
+    if (!sample || typeof sample !== 'object') {
+      return Array.from(new Set([...arrA, ...arrB]));
+    }
+    const idKey = ['id', 'code', 'learnerId', 'studentName', 'teacherName', 'key'].find(k => k in sample) || 'id';
+    const map = new Map();
+    arrA.forEach(x => {
+      const k = String(x[idKey] || '');
+      if (k) map.set(k, x);
+    });
+    arrB.forEach(x => {
+      const k = String(x[idKey] || '');
+      if (k) {
+        const existing = map.get(k);
+        map.set(k, existing ? { ...existing, ...x } : x);
+      }
+    });
+    return Array.from(map.values());
+  }
+
+  function mergeStates(serverValue: string | undefined, clientValue: string): string {
+    if (!serverValue) return clientValue;
+    if (!clientValue) return serverValue;
+
+    try {
+      const serverObj = JSON.parse(serverValue);
+      const clientObj = JSON.parse(clientValue);
+
+      // If both are arrays, do a smart item-by-item merge
+      if (Array.isArray(serverObj) && Array.isArray(clientObj)) {
+        const sample = serverObj[0] || clientObj[0];
+        if (sample && typeof sample === 'object') {
+          const idKey = ['id', 'code', 'learnerId', 'studentName', 'teacherName', 'key'].find(k => k in sample) || 'id';
+          const mergedMap = new Map();
+
+          // Load server items
+          serverObj.forEach((item: any) => {
+            if (item && typeof item === 'object') {
+              const key = String(item[idKey] || '');
+              if (key) mergedMap.set(key, item);
+            }
+          });
+
+          // Merging client items
+          clientObj.forEach((item: any) => {
+            if (item && typeof item === 'object') {
+              const key = String(item[idKey] || '');
+              if (key) {
+                const existingItem = mergedMap.get(key);
+                if (existingItem) {
+                  // Combine them
+                  const mergedItem = { ...existingItem, ...item };
+                  
+                  // If there are nested arrays, merge them recursively
+                  Object.keys(item).forEach(prop => {
+                    if (Array.isArray(item[prop]) && Array.isArray(existingItem[prop])) {
+                      mergedItem[prop] = mergeArraysPrimitiveOrObj(existingItem[prop], item[prop]);
+                    }
+                  });
+
+                  mergedMap.set(key, mergedItem);
+                } else {
+                  mergedMap.set(key, item);
+                }
+              }
+            }
+          });
+
+          return JSON.stringify(Array.from(mergedMap.values()));
+        }
+
+        // Fallback for primitive arrays
+        return JSON.stringify(Array.from(new Set([...serverObj, ...clientObj])));
+      }
+
+      // If both are single objects, merge their keys
+      if (typeof serverObj === 'object' && typeof clientObj === 'object' && serverObj !== null && clientObj !== null) {
+        return JSON.stringify({ ...serverObj, ...clientObj });
+      }
+    } catch (e) {
+      console.error("[Merge Error]", e);
+    }
+
+    return clientValue;
+  }
+
   app.post("/api/sync", (req, res) => {
     try {
       const { clientData } = req.body;
@@ -63,11 +150,36 @@ async function startServer() {
         return res.status(400).json({ error: "Invalid client data representation" });
       }
 
+      // 1. Merge tombstones first
+      const clientTombstonesRaw = clientData['rq_tombstones'] || "{}";
+      const serverTombstonesRaw = serverStateStore['rq_tombstones'] || "{}";
+      
+      let clientTombstones: Record<string, string[]> = {};
+      let serverTombstones: Record<string, string[]> = {};
+      try {
+        clientTombstones = JSON.parse(clientTombstonesRaw);
+      } catch (e) {}
+      try {
+        serverTombstones = JSON.parse(serverTombstonesRaw);
+      } catch (e) {}
+
+      // Combine tombstones (union)
+      const mergedTombstones: Record<string, string[]> = { ...serverTombstones };
+      Object.keys(clientTombstones).forEach(key => {
+        const clientList = clientTombstones[key] || [];
+        const serverList = mergedTombstones[key] || [];
+        mergedTombstones[key] = Array.from(new Set([...serverList, ...clientList]));
+      });
+
+      // Save merged tombstones
+      serverStateStore['rq_tombstones'] = JSON.stringify(mergedTombstones);
+      serverStateStore['rq_tombstones_timestamp'] = String(Date.now());
+
       let updatedKeys = 0;
 
-      // Filter and evaluate each incoming key for sync potential
+      // 2. Filter and evaluate each incoming key for sync potential
       Object.keys(clientData).forEach(key => {
-        if (!key.startsWith("rq_") || key === "rq_active_role" || key.endsWith("_timestamp")) {
+        if (!key.startsWith("rq_") || key === "rq_active_role" || key === "rq_tombstones" || key.endsWith("_timestamp")) {
           return;
         }
 
@@ -79,15 +191,62 @@ async function startServer() {
         const serverTimeStr = serverStateStore[`${key}_timestamp`] || "0";
         const serverTime = parseInt(serverTimeStr, 10) || 0;
 
-        // Overwrite if server lacks it, or client value has a newer timestamp
-        if (serverVal === undefined || clientTime > serverTime) {
-          serverStateStore[key] = clientVal;
-          serverStateStore[`${key}_timestamp`] = String(clientTime);
+        // Perform advanced JSON-level merging
+        let mergedVal = clientVal;
+        if (serverVal !== undefined) {
+          mergedVal = mergeStates(serverVal, clientVal);
+        }
+
+        // Apply tombstones to the merged array to filter deleted items out
+        try {
+          let parsedMerged = JSON.parse(mergedVal);
+          
+          // Filter top-level arrays
+          if (Array.isArray(parsedMerged)) {
+            const deletedIds = mergedTombstones[key] || [];
+            const sample = parsedMerged[0];
+            const idKey = sample ? (['id', 'code', 'learnerId', 'studentName', 'teacherName', 'key'].find(k => k in sample) || 'id') : 'id';
+            
+            let filtered = parsedMerged.filter((item: any) => {
+              if (item && typeof item === 'object') {
+                const itemKey = String(item[idKey] || '');
+                return !deletedIds.includes(itemKey);
+              }
+              return true;
+            });
+
+            // Filter nested learners in groups
+            if (key === 'rq_groups') {
+              const deletedLearners = mergedTombstones['rq_learners'] || [];
+              if (deletedLearners.length > 0) {
+                filtered = filtered.map((g: any) => {
+                  if (g && Array.isArray(g.learners)) {
+                    return {
+                      ...g,
+                      learners: g.learners.filter((l: any) => !deletedLearners.includes(String(l.id)))
+                    };
+                  }
+                  return g;
+                });
+              }
+            }
+
+            mergedVal = JSON.stringify(filtered);
+          }
+        } catch (e) {
+          // Fallback to mergedVal
+        }
+
+        // Overwrite or update if has actual difference
+        if (serverStateStore[key] !== mergedVal) {
+          serverStateStore[key] = mergedVal;
+          const highestTime = Math.max(clientTime, serverTime, Date.now());
+          serverStateStore[`${key}_timestamp`] = String(highestTime);
           updatedKeys++;
         }
       });
 
-      if (updatedKeys > 0) {
+      if (updatedKeys > 0 || clientData['rq_tombstones']) {
         saveServerDB();
       }
 
