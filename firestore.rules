@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Allow read/write access to the global_state keys for verified app sessions
+    match /global_state/{key} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
