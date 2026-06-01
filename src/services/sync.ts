@@ -1,18 +1,30 @@
 /**
- * 🔄 DataSyncManager — Real-time cross-device sync using Supabase
- * Replaces Firebase Firestore with Supabase Realtime + PostgreSQL
+ * 🔄 DataSyncManager - Central client-server synchronization manager for real-time operations
+ * Facilitates instant cross-device updates for important events (Attendance, Absences, Results, etc.)
+ * Integrates directly with real-time Firebase Firestore database for absolute persistence and sub-second updates!
  */
 
-import { supabase } from './supabaseConfig';
+import { initializeApp } from "firebase/app";
+import { getAuth, signInAnonymously } from "firebase/auth";
+import { 
+  getFirestore, 
+  doc, 
+  collection, 
+  getDoc, 
+  setDoc, 
+  onSnapshot, 
+  writeBatch 
+} from "firebase/firestore";
+import firebaseConfig from "./firebaseConfig";
 
 // 🛡️ Global Storage Interception & Timestamp Automation
 if (typeof window !== 'undefined' && !(window as any).__storage_intercepted__) {
   (window as any).__storage_intercepted__ = true;
   (window as any).__is_syncing_data__ = false;
 
-  const originalSetItem = localStorage.setItem.bind(localStorage);
+  const originalSetItem = localStorage.setItem;
   localStorage.setItem = function (key: string, value: string) {
-    originalSetItem(key, value);
+    originalSetItem.call(localStorage, key, value);
     if (
       key.startsWith('rq_') &&
       key !== 'rq_active_role' &&
@@ -20,195 +32,283 @@ if (typeof window !== 'undefined' && !(window as any).__storage_intercepted__) {
       !(window as any).__is_syncing_data__
     ) {
       const timestamp = (window as any).__is_initializing_default__ ? '1' : String(Date.now());
-      originalSetItem(`${key}_timestamp`, timestamp);
+      originalSetItem.call(localStorage, `${key}_timestamp`, timestamp);
     }
   };
 
-  const originalRemoveItem = localStorage.removeItem.bind(localStorage);
+  const originalRemoveItem = localStorage.removeItem;
   localStorage.removeItem = function (key: string) {
-    originalRemoveItem(key);
+    originalRemoveItem.call(localStorage, key);
     if (
       key.startsWith('rq_') &&
       key !== 'rq_active_role' &&
       !key.endsWith('_timestamp') &&
       !(window as any).__is_syncing_data__
     ) {
-      originalRemoveItem(`${key}_timestamp`);
+      originalRemoveItem.call(localStorage, `${key}_timestamp`);
     }
   };
+}
+
+// Global Firebase state trackers
+let firebaseApp: any = null;
+let db: any = null;
+let auth: any = null;
+let firebaseInitialized = false;
+
+try {
+  const isApiKeyValid = firebaseConfig.apiKey && 
+                        firebaseConfig.apiKey.trim() !== '' && 
+                        firebaseConfig.apiKey !== 'your_api_key_here';
+
+  if (isApiKeyValid) {
+    firebaseApp = initializeApp(firebaseConfig);
+    const _dbId = (firebaseConfig as any).firestoreDatabaseId;
+    db = (_dbId && _dbId !== '(default)' && _dbId !== '')
+      ? getFirestore(firebaseApp, _dbId)
+      : getFirestore(firebaseApp);
+    auth = getAuth(firebaseApp);
+    firebaseInitialized = true;
+    console.log("[DataSyncManager] Standard Cloud Database client initialized successfully.");
+  } else {
+    console.warn("[DataSyncManager] Firebase configuration is absent or placeholder. Operating in Offline-Only Local Storage mode.");
+  }
+} catch (err) {
+  console.error("[DataSyncManager] Failed to initialize Firebase SDK:", err);
 }
 
 export class DataSyncManager {
   private static isSyncing = false;
   private static syncIntervalId: any = null;
-  private static realtimeChannel: any = null;
+  private static eventSource: EventSource | null = null;
+  private static listUnsub: (() => void) | null = null;
   private static listeners = new Set<() => void>();
-  private static supabaseReady = false;
 
   static {
-    DataSyncManager.checkSupabaseReady();
-  }
-
-  private static async checkSupabaseReady() {
-    try {
-      const { error } = await supabase.from('global_state').select('key').limit(1);
-      if (!error) {
-        DataSyncManager.supabaseReady = true;
-        console.log('[DataSyncManager] Supabase connection established ✅');
-        DataSyncManager.startRealtimeSubscription();
-      } else {
-        console.warn('[DataSyncManager] Supabase not ready:', error.message);
-      }
-    } catch (e) {
-      console.warn('[DataSyncManager] Supabase check failed:', e);
+    // Initiate anonymous sign in to ensure secure database security validation rules
+    if (auth) {
+      signInAnonymously(auth)
+        .then(() => {
+          console.log("[DataSyncManager] Secure cloud database link established.");
+          this.startFirestoreRealtimeStream();
+        })
+        .catch((err) => {
+          console.warn("[DataSyncManager] Cloud token login rejected or delayed:", err);
+        });
     }
   }
 
   public static subscribe(listener: () => void) {
     this.listeners.add(listener);
-    return () => { this.listeners.delete(listener); };
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   private static notifyListeners() {
     this.listeners.forEach(listener => {
-      try { listener(); } catch (e) { console.error('[DataSyncManager] Listener error:', e); }
+      try {
+        listener();
+      } catch (err) {
+        console.error("[Sync Manager] Error notifying listener:", err);
+      }
     });
   }
 
-  private static startRealtimeSubscription() {
-    if (this.realtimeChannel) return;
-
-    this.realtimeChannel = supabase
-      .channel('global_state_changes')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'global_state',
-      }, (payload: any) => {
-        const row = payload.new || payload.old;
-        if (!row || !row.key) return;
-
-        const key = row.key;
-        if (key === 'rq_active_role') return;
-
-        const remoteVal = row.value || '';
-        const remoteTime = parseInt(String(row.timestamp || '0')) || 0;
-        const localVal = localStorage.getItem(key);
-        const localTime = parseInt(localStorage.getItem(`${key}_timestamp`) || '0') || 0;
-
-        if (remoteTime > localTime) {
-          const merged = DataSyncManager.mergeStates(remoteVal, localVal || '', remoteTime, localTime);
-          (window as any).__is_syncing_data__ = true;
-          localStorage.setItem(key, merged);
-          localStorage.setItem(`${key}_timestamp`, String(remoteTime));
-          (window as any).__is_syncing_data__ = false;
-          console.log('[DataSyncManager] ⚡ Realtime update:', key);
-          DataSyncManager.notifyListeners();
-        }
-      })
-      .subscribe();
-  }
-
+  /**
+   * Main synchronization routine
+   * Collects all 'rq_' variables and merges them with the cloud state based on highest timestamp (Last-Write-Wins),
+   * falling back gracefully to the REST server API if the cloud connection is not ready.
+   */
   public static async syncWithServer(onSuccessNotification?: () => void) {
     if (typeof window === 'undefined') return;
     if (this.isSyncing) return;
-    if (!this.supabaseReady) {
-      await this.checkSupabaseReady();
-      if (!this.supabaseReady) return;
-    }
 
     this.isSyncing = true;
     try {
-      // جمع كل مفاتيح rq_ المحلية
-      const localData: Record<string, { value: string; timestamp: number }> = {};
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith('rq_') && key !== 'rq_active_role' && !key.endsWith('_timestamp')) {
-          const val = localStorage.getItem(key) || '';
-          const tVal = parseInt(localStorage.getItem(`${key}_timestamp`) || '1') || 1;
-          localData[key] = { value: val, timestamp: tVal };
+      // 🟢 Part 1: Primary Sync - Real-time Serverless-Safe Firestore Database Sync
+      if (firebaseInitialized && db && auth?.currentUser) {
+        const localChangesToUpload: Record<string, { value: string; timestamp: string }> = {};
+        
+        // Gather all local 'rq_' keys
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith('rq_') && key !== 'rq_active_role' && !key.endsWith('_timestamp')) {
+            const val = localStorage.getItem(key) || '';
+            const tKey = `${key}_timestamp`;
+            let tVal = localStorage.getItem(tKey);
+            if (!tVal) {
+              tVal = '1';
+              (window as any).__is_syncing_data__ = true;
+              localStorage.setItem(tKey, tVal);
+              (window as any).__is_syncing_data__ = false;
+            }
+            localChangesToUpload[key] = { value: val, timestamp: tVal };
+          }
         }
-      }
 
-      // جلب كل السجلات من Supabase دفعة واحدة
-      const { data: remoteRows, error } = await supabase
-        .from('global_state')
-        .select('key, value, timestamp');
+        const batch = writeBatch(db);
+        let batchHasOperations = false;
+        let localHasChanges = false;
 
-      if (error) {
-        console.warn('[DataSyncManager] Supabase fetch error:', error.message);
+        // Sync individual keys to prevent single-document bottlenecks
+        for (const key of Object.keys(localChangesToUpload)) {
+          const docRef = doc(db, "global_state", key);
+          const docSnap = await getDoc(docRef);
+          
+          const localItem = localChangesToUpload[key];
+          let finalVal = localItem.value;
+          let finalTime = localItem.timestamp;
+
+          if (docSnap.exists()) {
+            const remoteData = docSnap.data();
+            const remoteVal = remoteData.value || '';
+            const remoteTimestampStr = String(remoteData.timestamp || '0');
+
+            const localTime = parseInt(localItem.timestamp) || 0;
+            const remoteTime = parseInt(remoteTimestampStr) || 0;
+
+            if (remoteTime > localTime) {
+              // Remote is strictly newer
+              const merged = this.mergeStates(remoteVal, localItem.value, remoteTime, localTime);
+              finalVal = merged;
+              finalTime = String(remoteTime);
+
+              (window as any).__is_syncing_data__ = true;
+              localStorage.setItem(key, merged);
+              localStorage.setItem(`${key}_timestamp`, String(remoteTime));
+              (window as any).__is_syncing_data__ = false;
+              localHasChanges = true;
+            } else if (localTime > remoteTime) {
+              // Local is newer, schedules direct write to database
+              batch.set(docRef, { value: finalVal, timestamp: finalTime });
+              batchHasOperations = true;
+            } else if (localItem.value !== remoteVal) {
+              // Same timestamp but different content, merge and write
+              const merged = this.mergeStates(remoteVal, localItem.value, remoteTime, localTime);
+              finalVal = merged;
+              finalTime = String(localTime);
+
+              (window as any).__is_syncing_data__ = true;
+              localStorage.setItem(key, merged);
+              (window as any).__is_syncing_data__ = false;
+              localHasChanges = true;
+
+              batch.set(docRef, { value: finalVal, timestamp: finalTime });
+              batchHasOperations = true;
+            }
+          } else {
+            // Document doesn't exist yet on the server, upload
+            batch.set(docRef, { value: finalVal, timestamp: finalTime });
+            batchHasOperations = true;
+          }
+        }
+
+        if (batchHasOperations) {
+          await batch.commit();
+          console.log("[DataSyncManager] Pushed local changes to Cloud Database successfully.");
+        }
+
+        if (localHasChanges || batchHasOperations) {
+          if (onSuccessNotification) {
+            onSuccessNotification();
+          }
+          this.notifyListeners();
+        }
+        
+        this.isSyncing = false;
         return;
       }
 
-      const remoteMap: Record<string, { value: string; timestamp: number }> = {};
-      (remoteRows || []).forEach((row: any) => {
-        remoteMap[row.key] = {
-          value: row.value || '',
-          timestamp: parseInt(String(row.timestamp || '0')) || 0
-        };
+      // 🔵 Part 2: Fallback Sync - Native Express REST Router Link
+      const clientData: Record<string, string> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('rq_') && key !== 'rq_active_role') {
+          const val = localStorage.getItem(key) || '';
+          clientData[key] = val;
+
+          if (!key.endsWith('_timestamp')) {
+            const timestampKey = `${key}_timestamp`;
+            if (!localStorage.getItem(timestampKey)) {
+              const defaultTime = '1';
+              localStorage.setItem(timestampKey, defaultTime);
+              clientData[timestampKey] = defaultTime;
+            }
+          }
+        }
+      }
+
+      const res = await fetch('/api/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ clientData })
       });
 
-      const upserts: { key: string; value: string; timestamp: number }[] = [];
-      let localHasChanges = false;
+      if (res.ok) {
+        const json = await res.json();
+        const mergedData = json.mergedData || {};
+        let hasChanges = false;
 
-      for (const key of Object.keys(localData)) {
-        const local = localData[key];
-        const remote = remoteMap[key];
-
-        if (!remote) {
-          upserts.push({ key, value: local.value, timestamp: local.timestamp });
-        } else if (remote.timestamp > local.timestamp) {
-          const merged = this.mergeStates(remote.value, local.value, remote.timestamp, local.timestamp);
-          (window as any).__is_syncing_data__ = true;
-          localStorage.setItem(key, merged);
-          localStorage.setItem(`${key}_timestamp`, String(remote.timestamp));
+        (window as any).__is_syncing_data__ = true;
+        try {
+          Object.keys(mergedData).forEach(key => {
+            if (key === 'rq_active_role') return;
+            
+            const oldVal = localStorage.getItem(key);
+            const newVal = mergedData[key];
+            if (oldVal !== newVal) {
+              localStorage.setItem(key, newVal);
+              hasChanges = true;
+            }
+          });
+        } finally {
           (window as any).__is_syncing_data__ = false;
-          localHasChanges = true;
-        } else if (local.timestamp > remote.timestamp) {
-          upserts.push({ key, value: local.value, timestamp: local.timestamp });
-        } else if (local.value !== remote.value) {
-          const merged = this.mergeStates(remote.value, local.value, remote.timestamp, local.timestamp);
-          (window as any).__is_syncing_data__ = true;
-          localStorage.setItem(key, merged);
-          (window as any).__is_syncing_data__ = false;
-          localHasChanges = true;
-          upserts.push({ key, value: merged, timestamp: local.timestamp });
         }
-      }
 
-      if (upserts.length > 0) {
-        const { error: upsertError } = await supabase
-          .from('global_state')
-          .upsert(upserts, { onConflict: 'key' });
-        if (upsertError) {
-          console.warn('[DataSyncManager] Upsert error:', upsertError.message);
-        } else {
-          console.log('[DataSyncManager] ☁️ Pushed', upserts.length, 'keys to Supabase.');
+        if (hasChanges) {
+          if (onSuccessNotification) {
+            onSuccessNotification();
+          }
+          this.notifyListeners();
         }
-      }
-
-      if (localHasChanges || upserts.length > 0) {
-        if (onSuccessNotification) onSuccessNotification();
-        this.notifyListeners();
       }
     } catch (err) {
-      console.warn('[DataSyncManager] Sync error (working locally):', err);
+      console.warn("[DataSyncManager] Primary Cloud server sync unavailable (Operating locally).", err);
     } finally {
       this.isSyncing = false;
     }
   }
 
+  /**
+   * Instantly forces synchronization to propagate changes to other devices immediately.
+   */
   public static triggerImmediateSync(onSuccessNotification?: () => void) {
     this.syncWithServer(onSuccessNotification);
   }
 
-  public static startAutoSync(onSuccessNotification: () => void, intervalMs = 10000) {
+  /**
+   * Starts a background interval synchronization routine.
+   */
+  public static startAutoSync(onSuccessNotification: () => void, intervalMs: number = 3000) {
     if (typeof window === 'undefined') return;
     if (this.syncIntervalId) return;
-    setTimeout(() => this.syncWithServer(onSuccessNotification), 500);
-    this.syncIntervalId = setInterval(() => this.syncWithServer(onSuccessNotification), intervalMs);
+
+    this.syncIntervalId = setInterval(() => {
+      this.syncWithServer(onSuccessNotification);
+    }, intervalMs);
+
+    // Initial trigger
+    setTimeout(() => {
+      this.syncWithServer(onSuccessNotification);
+    }, 300);
   }
 
+  /**
+   * Clean up resources
+   */
   public static stopAutoSync() {
     if (this.syncIntervalId) {
       clearInterval(this.syncIntervalId);
@@ -216,31 +316,186 @@ export class DataSyncManager {
     }
   }
 
-  // stub للتوافق مع store.ts
-  public static startRealtimeStream(onSuccessNotification: () => void) {
-    this.subscribe(onSuccessNotification);
+  /**
+   * Realtime Event Streaming connection using serverless-friendly Firestore snapshots
+   */
+  public static startFirestoreRealtimeStream() {
+    if (!firebaseInitialized || !db) return;
+    if (this.listUnsub) return;
+
+    try {
+      const colRef = collection(db, "global_state");
+      this.listUnsub = onSnapshot(colRef, (snapshot) => {
+        let hasChanges = false;
+
+        (window as any).__is_syncing_data__ = true;
+        try {
+          snapshot.forEach((docSnap) => {
+            const key = docSnap.id;
+            const data = docSnap.data();
+            if (!key || !data) return;
+
+            const remoteVal = data.value || '';
+            const remoteTimestampStr = String(data.timestamp || '0');
+
+            const localVal = localStorage.getItem(key);
+            const localTimestampStr = localStorage.getItem(`${key}_timestamp`) || '0';
+
+            const localTime = parseInt(localTimestampStr) || 0;
+            const remoteTime = parseInt(remoteTimestampStr) || 0;
+
+            if (remoteTime > localTime) {
+              // Remote is strictly newer
+              localStorage.setItem(key, remoteVal);
+              localStorage.setItem(`${key}_timestamp`, remoteTimestampStr);
+              hasChanges = true;
+            } else if (remoteTime === localTime && remoteVal !== localVal) {
+              // Same timestamp but different content: Merge safely
+              const merged = this.mergeStates(remoteVal, localVal || '', remoteTime, localTime);
+              if (merged !== localVal) {
+                localStorage.setItem(key, merged);
+                hasChanges = true;
+              }
+            }
+          });
+        } finally {
+          (window as any).__is_syncing_data__ = false;
+        }
+
+        if (hasChanges) {
+          console.log("[DataSyncManager] Instant Cloud Database push update triggered!");
+          this.notifyListeners();
+        }
+      }, (err) => {
+        console.warn("[DataSyncManager] Firestore stream disconnected, retrying standard polling...", err);
+      });
+    } catch (e) {
+      console.error("[DataSyncManager] Error establishing Firestore listener stream:", e);
+    }
   }
 
-  private static mergeStates(
-    serverValue: string | undefined,
-    clientValue: string,
-    serverTime: number,
-    clientTime: number
-  ): string {
+  public static stopFirestoreRealtimeStream() {
+    if (this.listUnsub) {
+      this.listUnsub();
+      this.listUnsub = null;
+    }
+  }
+
+  /**
+   * Realtime Event Streaming connection using standard Server-Sent Events (SSE) (Fallback for non-Firestore deployments)
+   */
+  public static startRealtimeStream(onSuccessNotification: () => void) {
+    if (typeof window === 'undefined') return;
+    if (this.eventSource) return;
+
+    const establishSSE = () => {
+      const es = new EventSource('/api/sync-stream');
+      this.eventSource = es;
+
+      es.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(event.data);
+          const mergedData = parsed.mergedData || {};
+          let hasChanges = false;
+
+          (window as any).__is_syncing_data__ = true;
+          try {
+            Object.keys(mergedData).forEach(key => {
+              if (key === 'rq_active_role') return;
+
+              const oldVal = localStorage.getItem(key);
+              const newVal = mergedData[key];
+              if (oldVal !== newVal) {
+                localStorage.setItem(key, newVal);
+                hasChanges = true;
+              }
+            });
+          } finally {
+            (window as any).__is_syncing_data__ = false;
+          }
+
+          if (hasChanges) {
+            if (onSuccessNotification) {
+              onSuccessNotification();
+            }
+            this.notifyListeners();
+          }
+        } catch (e) {
+          console.error("[DataSyncManager] Error parsing realtime update payload:", e);
+        }
+      };
+
+      es.onerror = (err) => {
+        es.close();
+        if (this.eventSource === es) {
+          this.eventSource = null;
+        }
+        setTimeout(() => {
+          if (!this.eventSource) establishSSE();
+        }, 5000);
+      };
+    };
+
+    establishSSE();
+  }
+
+  public static stopRealtimeStream() {
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
+    }
+  }
+
+  // --- Utility State Merging Algorithms ---
+
+  private static getObjectTimestamp(obj: any): number {
+    if (!obj || typeof obj !== 'object') return 0;
+    const fields = ['submittedAt', 'timestamp', 'updatedAt', 'createdAt'];
+    for (const f of fields) {
+      if (obj[f]) {
+        const t = new Date(obj[f]).getTime();
+        if (!isNaN(t)) return t;
+      }
+    }
+    return 0;
+  }
+
+  private static mergeArraysPrimitiveOrObj(arrA: any[], arrB: any[]): any[] {
+    const sample = arrA[0] || arrB[0];
+    if (!sample || typeof sample !== 'object') {
+      return Array.from(new Set([...arrA, ...arrB]));
+    }
+    const idKey = ['id', 'code', 'learnerId', 'studentName', 'teacherName', 'key'].find(k => k in sample) || 'id';
+    const map = new Map();
+    arrA.forEach(x => {
+      const k = String(x[idKey] || '');
+      if (k) map.set(k, x);
+    });
+    arrB.forEach(x => {
+      const k = String(x[idKey] || '');
+      if (k) {
+        const existing = map.get(k);
+        map.set(k, existing ? { ...existing, ...x } : x);
+      }
+    });
+    return Array.from(map.values());
+  }
+
+  private static mergeStates(serverValue: string | undefined, clientValue: string, serverTime: number, clientTime: number): string {
     if (!serverValue) return clientValue;
     if (!clientValue) return serverValue;
 
     const trimmedServer = serverValue.trim();
     const trimmedClient = clientValue.trim();
 
-    const isServerJson =
-      (trimmedServer.startsWith('{') && trimmedServer.endsWith('}')) ||
-      (trimmedServer.startsWith('[') && trimmedServer.endsWith(']'));
-    const isClientJson =
-      (trimmedClient.startsWith('{') && trimmedClient.endsWith('}')) ||
-      (trimmedClient.startsWith('[') && trimmedClient.endsWith(']'));
+    const isServerJson = (trimmedServer.startsWith("{") && trimmedServer.endsWith("}")) || 
+                         (trimmedServer.startsWith("[") && trimmedServer.endsWith("]"));
+    const isClientJson = (trimmedClient.startsWith("{") && trimmedClient.endsWith("}")) || 
+                         (trimmedClient.startsWith("[") && trimmedClient.endsWith("]"));
 
-    if (!isServerJson || !isClientJson) return clientValue;
+    if (!isServerJson || !isClientJson) {
+      return clientValue;
+    }
 
     try {
       const serverObj = JSON.parse(trimmedServer);
@@ -249,47 +504,57 @@ export class DataSyncManager {
       if (Array.isArray(serverObj) && Array.isArray(clientObj)) {
         const sample = serverObj[0] || clientObj[0];
         if (sample && typeof sample === 'object') {
-          const idKey =
-            ['id', 'code', 'learnerId', 'studentName', 'teacherName', 'key'].find(
-              k => k in sample
-            ) || 'id';
+          const idKey = ['id', 'code', 'learnerId', 'studentName', 'teacherName', 'key'].find(k => k in sample) || 'id';
           const mergedMap = new Map();
 
           serverObj.forEach((item: any) => {
-            const k = String(item?.[idKey] || '');
-            if (k) mergedMap.set(k, item);
+            if (item && typeof item === 'object') {
+              const key = String(item[idKey] || '');
+              if (key) mergedMap.set(key, item);
+            }
           });
 
           clientObj.forEach((item: any) => {
-            const k = String(item?.[idKey] || '');
-            if (!k) return;
-            const existing = mergedMap.get(k);
-            if (existing) {
-              const tS =
-                parseInt(existing.updatedAt || existing.submittedAt || '0') || serverTime;
-              const tC =
-                parseInt(item.updatedAt || item.submittedAt || '0') || clientTime;
-              mergedMap.set(k, tS > tC ? { ...item, ...existing } : { ...existing, ...item });
-            } else {
-              mergedMap.set(k, item);
+            if (item && typeof item === 'object') {
+              const key = String(item[idKey] || '');
+              if (key) {
+                const existingItem = mergedMap.get(key);
+                if (existingItem) {
+                  const tServer = this.getObjectTimestamp(existingItem) || serverTime;
+                  const tClient = this.getObjectTimestamp(item) || clientTime;
+
+                  let mergedItem;
+                  if (tServer > tClient) {
+                    mergedItem = { ...item, ...existingItem };
+                  } else {
+                    mergedItem = { ...existingItem, ...item };
+                  }
+                  
+                  Object.keys(item).forEach(prop => {
+                    if (Array.isArray(item[prop]) && Array.isArray(existingItem[prop])) {
+                      mergedItem[prop] = this.mergeArraysPrimitiveOrObj(existingItem[prop], item[prop]);
+                    }
+                  });
+
+                  mergedMap.set(key, mergedItem);
+                } else {
+                  mergedMap.set(key, item);
+                }
+              }
             }
           });
 
           return JSON.stringify(Array.from(mergedMap.values()));
         }
+
         return JSON.stringify(Array.from(new Set([...serverObj, ...clientObj])));
       }
 
-      if (
-        typeof serverObj === 'object' &&
-        typeof clientObj === 'object' &&
-        serverObj !== null &&
-        clientObj !== null
-      ) {
+      if (typeof serverObj === 'object' && typeof clientObj === 'object' && serverObj !== null && clientObj !== null) {
         return JSON.stringify({ ...serverObj, ...clientObj });
       }
     } catch (e) {
-      // تجاهل أخطاء JSON
+      // Bypasses JSON syntax differences
     }
 
     return clientValue;

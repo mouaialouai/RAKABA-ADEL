@@ -1,10 +1,10 @@
 {
-  "projectId": "moonlit-plating-5nzsc",
-  "appId": "1:317538586298:web:e70ee0cdc8af615240fc83",
-  "apiKey": "AIzaSyDhHYzm3ila7XosclFBrEDYBWbFGzOg1d4",
-  "authDomain": "moonlit-plating-5nzsc.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-a08582af-9af4-4b35-b6a8-eeb78eb15ee3",
-  "storageBucket": "moonlit-plating-5nzsc.firebasestorage.app",
-  "messagingSenderId": "317538586298",
-  "measurementId": ""
+  "projectId": "",
+  "appId": "",
+  "apiKey": "",
+  "authDomain": "",
+  "storageBucket": "",
+  "messagingSenderId": "",
+  "measurementId": "",
+  "firestoreDatabaseId": "(default)"
 }
