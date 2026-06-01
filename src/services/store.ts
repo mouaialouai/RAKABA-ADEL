@@ -1434,6 +1434,11 @@ if (typeof window !== 'undefined') {
     AppStateStore.notifyListenersOnly();
   });
 
+  // 📜 Global DataSyncManager Subscriber to notify AppStateStore
+  DataSyncManager.subscribe(() => {
+    AppStateStore.notifyListenersOnly();
+  });
+
   // 🔵 2. Periodic robust background sync block (adjusted to 10s to lower load, as SSE handles the sub-second updates)
   DataSyncManager.startAutoSync(() => {
     AppStateStore.notifyListenersOnly();
