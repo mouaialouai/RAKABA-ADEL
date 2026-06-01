@@ -77,6 +77,18 @@ async function startServer() {
     return Array.from(map.values());
   }
 
+  function getObjectTimestamp(obj: any): number {
+    if (!obj || typeof obj !== 'object') return 0;
+    const fields = ['submittedAt', 'timestamp', 'updatedAt', 'createdAt'];
+    for (const f of fields) {
+      if (obj[f]) {
+        const t = new Date(obj[f]).getTime();
+        if (!isNaN(t)) return t;
+      }
+    }
+    return 0;
+  }
+
   function mergeStates(serverValue: string | undefined, clientValue: string): string {
     if (!serverValue) return clientValue;
     if (!clientValue) return serverValue;
@@ -120,8 +132,18 @@ async function startServer() {
               if (key) {
                 const existingItem = mergedMap.get(key);
                 if (existingItem) {
-                  // Combine them
-                  const mergedItem = { ...existingItem, ...item };
+                  // Core resolve: check if existing (server) item is newer or client is newer
+                  const tServer = getObjectTimestamp(existingItem);
+                  const tClient = getObjectTimestamp(item);
+
+                  let mergedItem;
+                  if (tServer > tClient) {
+                    // Server item is newer (e.g., has recorded absences or updates), preserve server fields
+                    mergedItem = { ...item, ...existingItem };
+                  } else {
+                    // Client item has newer or equal timestamp, preserve client fields
+                    mergedItem = { ...existingItem, ...item };
+                  }
                   
                   // If there are nested arrays, merge them recursively
                   Object.keys(item).forEach(prop => {
